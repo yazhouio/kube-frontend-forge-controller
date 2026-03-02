@@ -155,8 +155,8 @@ jobs:
           {
             echo "## Multi-platform image digests"
             echo
-            echo "| Image Tag | Digest |"
-            echo "| --- | --- |"
+            echo "| Image | Tags | Digest | Canonical Reference |"
+            echo "| --- | --- | --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           for image_name in frontend-forge-controller frontend-forge-runner; do
@@ -174,15 +174,23 @@ jobs:
               tags+=("${repo}:latest")
             fi
 
-            # 合并两个平台 digest 成一个 multi-arch manifest，并把 tags 推上去
+            # 一次性合并两个平台 digest，并同时挂上所有最终 tags。
+            primary_tag="${tags[0]}"
+            tag_args=()
             for t in "${tags[@]}"; do
-              docker buildx imagetools create \
-                -t "${t}" \
-                "${repo}@${amd_digest}" \
-                "${repo}@${arm_digest}"
-
-              multiarch_digest="$(docker buildx imagetools inspect "${t}" | sed -n 's/^Digest: //p' | head -n1)"
-              echo "multi-platform image digest: ${t} -> ${multiarch_digest}"
-              echo "| ${t} | \`${multiarch_digest}\` |" >> "$GITHUB_STEP_SUMMARY"
+              tag_args+=("-t" "${t}")
             done
+
+            docker buildx imagetools create \
+              "${tag_args[@]}" \
+              "${repo}@${amd_digest}" \
+              "${repo}@${arm_digest}"
+
+            multiarch_digest="$(docker buildx imagetools inspect "${primary_tag}" | sed -n 's/^Digest: //p' | head -n1)"
+            canonical_ref="${repo}@${multiarch_digest}"
+            joined_tags="$(printf '%s<br>' "${tags[@]}")"
+            joined_tags="${joined_tags%<br>}"
+
+            echo "multi-platform image digest: ${image_name} -> ${canonical_ref}"
+            echo "| ${image_name} | ${joined_tags} | \`${multiarch_digest}\` | \`${canonical_ref}\` |" >> "$GITHUB_STEP_SUMMARY"
           done
