@@ -9,7 +9,7 @@ kind: ClusterRole
 metadata:
   name: frontend-forge-runner-fi-reader
 rules:
-  - apiGroups: ["frontend-forge.io"]
+  - apiGroups: ["frontend-forge.kubesphere.io"]
     resources: ["frontendintegrations"]
     verbs: ["get"]
 ---

@@ -1,20 +1,12 @@
 use frontend_forge_api::{
-    ColumnRenderType, ColumnSpec, CrdIntegrationSpec, CrdScope, FrontendIntegration,
-    FrontendIntegrationSpec, IntegrationType, ManifestRenderError, MenuPlacement,
+    ColumnRenderType, ColumnSpec, CrdScope, CrdTablePageSpec, FrontendIntegration,
+    FrontendIntegrationSpec, ManifestRenderError, MenuNodeType, MenuPlacement, PageSpec, PageType,
 };
 use kube::ResourceExt;
 use serde_json::{Map, Value, json};
+use std::collections::{HashMap, HashSet};
 
 pub(super) fn render_v1_manifest(fi: &FrontendIntegration) -> Result<Value, ManifestRenderError> {
-    let fi_name = fi.name_any();
-    let routing_path = fi.spec.routing.path.trim();
-    if routing_path.is_empty() || routing_path.starts_with('/') {
-        return Err(ManifestRenderError::InvalidRoutingPath {
-            fi_name,
-            path: fi.spec.routing.path.clone(),
-        });
-    }
-
     let fi_name = fi.name_any();
     let display_name = fi
         .spec
@@ -26,78 +18,29 @@ pub(super) fn render_v1_manifest(fi: &FrontendIntegration) -> Result<Value, Mani
         .annotations
         .as_ref()
         .and_then(|a| a.get("kubesphere.io/description").cloned());
-    let placements = effective_placements(&fi.spec);
+    let resolved_menus = resolve_spec(&fi.spec, &fi_name)?;
 
-    let route_tail = format!("/frontendintegrations/{}/{}", fi_name, routing_path);
-    let routes: Vec<Value> = placements
-        .iter()
-        .map(|placement| {
-            let page_id = page_id(&fi_name, *placement);
-            let path = format!("{}{}", placement.route_prefix(), route_tail);
-            json!({
-                "path": path,
-                "pageId": page_id,
-            })
-        })
-        .collect();
+    let mut routes = Vec::new();
+    let mut menus = Vec::new();
+    let mut pages = Vec::new();
 
-    let menus: Vec<Value> = if fi.spec.menu.is_some() {
-        let menu_title = fi
-            .spec
-            .menu
-            .as_ref()
-            .and_then(|m| m.name.clone())
-            .unwrap_or_else(|| display_name.clone());
-        placements
-            .iter()
-            .map(|placement| {
-                json!({
-                    "parent": placement.as_str(),
-                    "name": format!("frontendintegrations/{}/{}", fi_name, routing_path),
-                    "title": menu_title,
-                    "icon": "GridDuotone",
-                    "order": 999,
-                })
-            })
-            .collect()
-    } else {
-        vec![]
-    };
-
-    let pages = match fi.spec.integration.type_ {
-        IntegrationType::Iframe => {
-            let iframe = fi.spec.integration.iframe.as_ref().ok_or_else(|| {
-                ManifestRenderError::InvalidIntegrationShape {
-                    fi_name: fi_name.clone(),
-                    integration_type: "iframe".to_string(),
-                }
-            })?;
-            placements
-                .iter()
-                .map(|placement| iframe_page(&fi_name, &display_name, *placement, &iframe.src))
-                .collect::<Vec<_>>()
-        }
-        IntegrationType::Crd => {
-            let crd = fi.spec.integration.crd.as_ref().ok_or_else(|| {
-                ManifestRenderError::InvalidIntegrationShape {
-                    fi_name: fi_name.clone(),
-                    integration_type: "crd".to_string(),
-                }
-            })?;
-            let columns = if !fi.spec.columns.is_empty() {
-                fi.spec.columns.clone()
-            } else {
-                crd.columns.clone()
-            };
-            if columns.is_empty() {
-                return Err(ManifestRenderError::MissingCrdColumns { fi_name });
+    for menu in resolved_menus {
+        match menu {
+            ResolvedTopMenu::Page(page) => {
+                menus.push(render_leaf_menu(&page));
+                routes.push(render_route(&fi_name, &page));
+                pages.push(render_page(&fi_name, &page)?);
             }
-            placements
-                .iter()
-                .map(|placement| crd_page(&fi_name, &display_name, *placement, crd, &columns))
-                .collect::<Vec<_>>()
+            ResolvedTopMenu::Organization { menu, children } => {
+                menus.push(render_organization_menu(&menu));
+                for child in children {
+                    menus.push(render_leaf_menu(&child));
+                    routes.push(render_route(&fi_name, &child));
+                    pages.push(render_page(&fi_name, &child)?);
+                }
+            }
         }
-    };
+    }
 
     let mut manifest = Map::new();
     manifest.insert("version".to_string(), json!("1.0"));
@@ -122,21 +65,328 @@ pub(super) fn render_v1_manifest(fi: &FrontendIntegration) -> Result<Value, Mani
     Ok(Value::Object(manifest))
 }
 
-fn effective_placements(spec: &FrontendIntegrationSpec) -> Vec<MenuPlacement> {
-    let placements = spec
-        .menu
-        .as_ref()
-        .map(|m| m.placements.clone())
-        .unwrap_or_default();
-    if placements.is_empty() {
-        vec![MenuPlacement::Global]
+#[derive(Clone, Debug)]
+enum ResolvedTopMenu {
+    Page(ResolvedPageBinding),
+    Organization {
+        menu: ResolvedOrganizationMenu,
+        children: Vec<ResolvedPageBinding>,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedOrganizationMenu {
+    name: String,
+    title: String,
+    placement: MenuPlacement,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedPageBinding {
+    title: String,
+    placement: MenuPlacement,
+    route_suffix: String,
+    menu_name: String,
+    parent: String,
+    page: PageSpec,
+}
+
+fn resolve_spec(
+    spec: &FrontendIntegrationSpec,
+    fi_name: &str,
+) -> Result<Vec<ResolvedTopMenu>, ManifestRenderError> {
+    let pages_by_key = resolve_pages(spec, fi_name)?;
+    let mut top_level_keys = HashSet::new();
+    let mut bound_page_keys = HashSet::new();
+    let mut resolved = Vec::new();
+
+    for menu in &spec.menus {
+        validate_key(fi_name, &menu.key, true)?;
+        if !top_level_keys.insert(menu.key.clone()) {
+            return Err(ManifestRenderError::DuplicateTopLevelMenuKey {
+                fi_name: fi_name.to_string(),
+                key: menu.key.clone(),
+            });
+        }
+
+        match menu.type_ {
+            MenuNodeType::Page => {
+                let top_menu_name = menu_name_for_suffix(fi_name, &menu.key);
+                if !menu.children.is_empty() {
+                    return Err(ManifestRenderError::InvalidMenuShape {
+                        fi_name: fi_name.to_string(),
+                        key: menu.key.clone(),
+                        message: "page menus cannot define children".to_string(),
+                    });
+                }
+
+                let page = bind_page(fi_name, &menu.key, &pages_by_key, &mut bound_page_keys)?;
+                resolved.push(ResolvedTopMenu::Page(ResolvedPageBinding {
+                    title: menu.display_name.clone(),
+                    placement: menu.placement,
+                    route_suffix: route_suffix_for_menu(&menu.key),
+                    menu_name: top_menu_name,
+                    parent: menu.placement.as_str().to_string(),
+                    page,
+                }));
+            }
+            MenuNodeType::Organization => {
+                let top_menu_name = menu_name_for_suffix(fi_name, &menu.key);
+                if menu.children.is_empty() {
+                    return Err(ManifestRenderError::InvalidMenuShape {
+                        fi_name: fi_name.to_string(),
+                        key: menu.key.clone(),
+                        message: "organization menus must define at least one child".to_string(),
+                    });
+                }
+                if pages_by_key.contains_key(&menu.key) {
+                    return Err(ManifestRenderError::InvalidMenuShape {
+                        fi_name: fi_name.to_string(),
+                        key: menu.key.clone(),
+                        message: "organization menus cannot bind to page configs".to_string(),
+                    });
+                }
+
+                let mut children = Vec::new();
+                for child in &menu.children {
+                    validate_key(fi_name, &child.key, true)?;
+                    let page = bind_page(fi_name, &child.key, &pages_by_key, &mut bound_page_keys)?;
+                    let route_suffix = route_suffix_for_child(&menu.key, &child.key);
+                    children.push(ResolvedPageBinding {
+                        title: child.display_name.clone(),
+                        placement: menu.placement,
+                        route_suffix: route_suffix.clone(),
+                        menu_name: menu_name_for_suffix(fi_name, &route_suffix),
+                        parent: top_menu_name.clone(),
+                        page,
+                    });
+                }
+
+                resolved.push(ResolvedTopMenu::Organization {
+                    menu: ResolvedOrganizationMenu {
+                        name: top_menu_name,
+                        title: menu.display_name.clone(),
+                        placement: menu.placement,
+                    },
+                    children,
+                });
+            }
+        }
+    }
+
+    for page in &spec.pages {
+        if !bound_page_keys.contains(&page.key) {
+            return Err(ManifestRenderError::OrphanPageConfig {
+                fi_name: fi_name.to_string(),
+                key: page.key.clone(),
+            });
+        }
+    }
+
+    Ok(resolved)
+}
+
+fn resolve_pages(
+    spec: &FrontendIntegrationSpec,
+    fi_name: &str,
+) -> Result<HashMap<String, PageSpec>, ManifestRenderError> {
+    let mut pages = HashMap::new();
+
+    for page in &spec.pages {
+        validate_key(fi_name, &page.key, false)?;
+        validate_page_shape(fi_name, page)?;
+        if pages.insert(page.key.clone(), page.clone()).is_some() {
+            return Err(ManifestRenderError::DuplicatePageKey {
+                fi_name: fi_name.to_string(),
+                key: page.key.clone(),
+            });
+        }
+    }
+
+    Ok(pages)
+}
+
+fn bind_page(
+    fi_name: &str,
+    key: &str,
+    pages_by_key: &HashMap<String, PageSpec>,
+    bound_page_keys: &mut HashSet<String>,
+) -> Result<PageSpec, ManifestRenderError> {
+    if !bound_page_keys.insert(key.to_string()) {
+        return Err(ManifestRenderError::DuplicatePageKey {
+            fi_name: fi_name.to_string(),
+            key: key.to_string(),
+        });
+    }
+
+    pages_by_key
+        .get(key)
+        .cloned()
+        .ok_or_else(|| ManifestRenderError::MissingPageForMenuKey {
+            fi_name: fi_name.to_string(),
+            key: key.to_string(),
+        })
+}
+
+fn validate_key(fi_name: &str, key: &str, is_menu_key: bool) -> Result<(), ManifestRenderError> {
+    let is_valid = !key.is_empty()
+        && !key.starts_with('-')
+        && !key.ends_with('-')
+        && key
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-');
+
+    if is_valid {
+        Ok(())
+    } else if is_menu_key {
+        Err(ManifestRenderError::InvalidMenuKey {
+            fi_name: fi_name.to_string(),
+            key: key.to_string(),
+        })
     } else {
-        placements
+        Err(ManifestRenderError::InvalidPageShape {
+            fi_name: fi_name.to_string(),
+            key: key.to_string(),
+            message: "page keys must be kebab-case route fragments".to_string(),
+        })
     }
 }
 
-fn page_id(fi_name: &str, placement: MenuPlacement) -> String {
-    format!("{}-{}", fi_name, placement.as_str())
+fn validate_page_shape(fi_name: &str, page: &PageSpec) -> Result<(), ManifestRenderError> {
+    match page.type_ {
+        PageType::Iframe => {
+            if page.iframe.is_none() {
+                return Err(ManifestRenderError::InvalidPageShape {
+                    fi_name: fi_name.to_string(),
+                    key: page.key.clone(),
+                    message: "type=iframe requires iframe config".to_string(),
+                });
+            }
+            if page.crd_table.is_some() {
+                return Err(ManifestRenderError::InvalidPageShape {
+                    fi_name: fi_name.to_string(),
+                    key: page.key.clone(),
+                    message: "type=iframe cannot define crdTable config".to_string(),
+                });
+            }
+        }
+        PageType::CrdTable => {
+            let Some(crd_table) = page.crd_table.as_ref() else {
+                return Err(ManifestRenderError::InvalidPageShape {
+                    fi_name: fi_name.to_string(),
+                    key: page.key.clone(),
+                    message: "type=crdTable requires crdTable config".to_string(),
+                });
+            };
+            if page.iframe.is_some() {
+                return Err(ManifestRenderError::InvalidPageShape {
+                    fi_name: fi_name.to_string(),
+                    key: page.key.clone(),
+                    message: "type=crdTable cannot define iframe config".to_string(),
+                });
+            }
+            if crd_table.columns.is_empty() {
+                return Err(ManifestRenderError::MissingCrdColumns {
+                    fi_name: fi_name.to_string(),
+                    key: page.key.clone(),
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn route_suffix_for_menu(key: &str) -> String {
+    key.to_string()
+}
+
+fn route_suffix_for_child(parent_key: &str, child_key: &str) -> String {
+    format!("{parent_key}/{child_key}")
+}
+
+fn menu_name_for_suffix(fi_name: &str, suffix: &str) -> String {
+    format!("frontendintegrations/{fi_name}/{suffix}")
+}
+
+fn page_id_for_suffix(fi_name: &str, placement: MenuPlacement, suffix: &str) -> String {
+    format!(
+        "{}-{}-{}",
+        fi_name,
+        placement.as_str(),
+        suffix.replace('/', "-")
+    )
+}
+
+fn render_route(fi_name: &str, page: &ResolvedPageBinding) -> Value {
+    let page_id = page_id_for_suffix(fi_name, page.placement, &page.route_suffix);
+    json!({
+        "path": format!(
+            "{}{}",
+            page.placement.route_prefix(),
+            route_tail(fi_name, &page.route_suffix)
+        ),
+        "pageId": page_id,
+    })
+}
+
+fn render_leaf_menu(page: &ResolvedPageBinding) -> Value {
+    json!({
+        "parent": page.parent,
+        "name": page.menu_name,
+        "title": page.title,
+        "icon": "GridDuotone",
+        "order": 999,
+    })
+}
+
+fn render_organization_menu(menu: &ResolvedOrganizationMenu) -> Value {
+    json!({
+        "parent": menu.placement.as_str(),
+        "name": menu.name,
+        "title": menu.title,
+        "icon": "GridDuotone",
+        "order": 999,
+    })
+}
+
+fn route_tail(fi_name: &str, suffix: &str) -> String {
+    format!("/frontendintegrations/{fi_name}/{suffix}")
+}
+
+fn render_page(fi_name: &str, page: &ResolvedPageBinding) -> Result<Value, ManifestRenderError> {
+    let page_id = page_id_for_suffix(fi_name, page.placement, &page.route_suffix);
+
+    match page.page.type_ {
+        PageType::Iframe => {
+            let iframe =
+                page.page
+                    .iframe
+                    .as_ref()
+                    .ok_or_else(|| ManifestRenderError::InvalidPageShape {
+                        fi_name: fi_name.to_string(),
+                        key: page.page.key.clone(),
+                        message: "type=iframe requires iframe config".to_string(),
+                    })?;
+            Ok(iframe_page(&page_id, &page.title, &iframe.src))
+        }
+        PageType::CrdTable => {
+            let crd_table = page.page.crd_table.as_ref().ok_or_else(|| {
+                ManifestRenderError::InvalidPageShape {
+                    fi_name: fi_name.to_string(),
+                    key: page.page.key.clone(),
+                    message: "type=crdTable requires crdTable config".to_string(),
+                }
+            })?;
+            Ok(crd_page(
+                &page_id,
+                &page.title,
+                page.placement,
+                crd_table,
+                &crd_table.columns,
+            ))
+        }
+    }
 }
 
 fn page_meta(page_id: &str, title: &str) -> Value {
@@ -148,18 +398,12 @@ fn page_meta(page_id: &str, title: &str) -> Value {
     })
 }
 
-fn iframe_page(
-    fi_name: &str,
-    display_name: &str,
-    placement: MenuPlacement,
-    frame_src: &str,
-) -> Value {
-    let page_id = page_id(fi_name, placement);
+fn iframe_page(page_id: &str, display_name: &str, frame_src: &str) -> Value {
     json!({
       "id": page_id,
       "entryComponent": page_id,
       "componentsTree": {
-        "meta": page_meta(&page_id, display_name),
+        "meta": page_meta(page_id, display_name),
         "context": {},
         "root": {
           "id": format!("{}-root", page_id),
@@ -174,22 +418,21 @@ fn iframe_page(
 }
 
 fn crd_page(
-    fi_name: &str,
+    page_id: &str,
     display_name: &str,
     placement: MenuPlacement,
-    crd: &CrdIntegrationSpec,
+    crd: &CrdTablePageSpec,
     columns: &[ColumnSpec],
 ) -> Value {
-    let page_id = page_id(fi_name, placement);
     let columns_config = transform_columns(columns);
     let page_state_type = crd_page_state_type(placement);
-    let page_state_config = crd_page_state_config(&page_id, placement, crd);
+    let page_state_config = crd_page_state_config(page_id, placement, crd);
 
     json!({
       "id": page_id,
       "entryComponent": page_id,
       "componentsTree": {
-        "meta": page_meta(&page_id, display_name),
+        "meta": page_meta(page_id, display_name),
         "context": {},
         "dataSources": [
           {
@@ -248,11 +491,7 @@ fn crd_page_state_type(placement: MenuPlacement) -> &'static str {
     }
 }
 
-fn crd_page_state_config(
-    page_id: &str,
-    placement: MenuPlacement,
-    crd: &CrdIntegrationSpec,
-) -> Value {
+fn crd_page_state_config(page_id: &str, placement: MenuPlacement, crd: &CrdTablePageSpec) -> Value {
     let mut config = Map::new();
     config.insert("PAGE_ID".to_string(), json!(page_id));
     config.insert(
@@ -272,7 +511,7 @@ fn crd_page_state_config(
     Value::Object(config)
 }
 
-fn crd_page_scope(crd: &CrdIntegrationSpec) -> &'static str {
+fn crd_page_scope(crd: &CrdTablePageSpec) -> &'static str {
     match crd.scope {
         CrdScope::Namespaced => "namespace",
         CrdScope::Cluster => "cluster",
@@ -316,11 +555,8 @@ fn transform_columns(columns: &[ColumnSpec]) -> Vec<Value> {
         .collect()
 }
 
-fn payload_object(payload: Option<&Value>) -> Map<String, Value> {
-    match payload {
-        Some(Value::Object(map)) => map.clone(),
-        _ => Map::new(),
-    }
+fn payload_object(payload: Option<&Map<String, Value>>) -> Map<String, Value> {
+    payload.cloned().unwrap_or_default()
 }
 
 fn render_type_str(t: &ColumnRenderType) -> &'static str {
@@ -339,33 +575,53 @@ mod tests {
     fn renders_workspace_crd_pages_with_workspace_page_state() {
         let fi: FrontendIntegration = serde_yaml::from_str(
             r#"
-apiVersion: frontend-forge.io/v1alpha1
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
 kind: FrontendIntegration
 metadata:
   name: test
 spec:
-  integration:
-    type: crd
-    crd:
-      names:
-        plural: serviceaccounts
-        kind: ServiceAccount
-      version: v1alpha1
-      group: kubesphere.io
-      scope: Namespaced
-      columns:
-        - key: name
-          title: NAME
-          enableSorting: true
-          render:
-            type: text
-            path: metadata.name
-  menu:
-    placements:
-      - cluster
-      - workspace
-  routing:
-    path: test
+  menus:
+    - displayName: Cluster Tasks
+      key: cluster-tasks
+      placement: cluster
+      type: page
+    - displayName: Workspace Tasks
+      key: workspace-tasks
+      placement: workspace
+      type: page
+  pages:
+    - key: cluster-tasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: serviceaccounts
+          kind: ServiceAccount
+        version: v1alpha1
+        group: kubesphere.io
+        scope: Namespaced
+        columns:
+          - key: name
+            title: NAME
+            enableSorting: true
+            render:
+              type: text
+              path: metadata.name
+    - key: workspace-tasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: serviceaccounts
+          kind: ServiceAccount
+        version: v1alpha1
+        group: kubesphere.io
+        scope: Namespaced
+        columns:
+          - key: name
+            title: NAME
+            enableSorting: true
+            render:
+              type: text
+              path: metadata.name
 "#,
         )
         .unwrap();
@@ -375,12 +631,322 @@ spec:
 
         let cluster_page_state = &pages[0]["componentsTree"]["dataSources"][1];
         assert_eq!(cluster_page_state["type"], "crd-page-state");
-        assert_eq!(cluster_page_state["config"]["PAGE_ID"], "test-cluster");
+        assert_eq!(
+            cluster_page_state["config"]["PAGE_ID"],
+            "test-cluster-cluster-tasks"
+        );
         assert_eq!(cluster_page_state["config"]["SCOPE"], "namespace");
 
         let workspace_page_state = &pages[1]["componentsTree"]["dataSources"][1];
         assert_eq!(workspace_page_state["type"], "workspace-crd-page-state");
-        assert_eq!(workspace_page_state["config"]["PAGE_ID"], "test-workspace");
+        assert_eq!(
+            workspace_page_state["config"]["PAGE_ID"],
+            "test-workspace-workspace-tasks"
+        );
         assert!(workspace_page_state["config"].get("SCOPE").is_none());
+    }
+
+    #[test]
+    fn renders_nested_org_menu_bindings() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo-fi
+spec:
+  displayName: Demo
+  menus:
+    - displayName: Ops
+      key: ops
+      placement: workspace
+      type: organization
+      children:
+        - displayName: Inspect Tasks
+          key: inspecttasks
+        - displayName: Ops Guide
+          key: ops-guide
+  pages:
+    - key: inspecttasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: inspecttasks
+          kind: InspectTask
+        group: kubeeye.kubesphere.io
+        version: v1alpha2
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            render:
+              type: text
+              path: metadata.name
+    - key: ops-guide
+      type: iframe
+      iframe:
+        src: http://example.test/ops-guide
+"#,
+        )
+        .unwrap();
+
+        let manifest = render_v1_manifest(&fi).unwrap();
+        let menus = manifest["menus"].as_array().unwrap();
+        let routes = manifest["routes"].as_array().unwrap();
+        let pages = manifest["pages"].as_array().unwrap();
+
+        assert_eq!(menus.len(), 3);
+        assert_eq!(routes.len(), 2);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(menus[0]["name"], "frontendintegrations/demo-fi/ops");
+        assert_eq!(menus[0]["parent"], "workspace");
+        assert_eq!(menus[1]["parent"], "frontendintegrations/demo-fi/ops");
+        assert_eq!(
+            menus[1]["name"],
+            "frontendintegrations/demo-fi/ops/inspecttasks"
+        );
+        assert_eq!(menus[2]["parent"], "frontendintegrations/demo-fi/ops");
+        assert_eq!(
+            menus[2]["name"],
+            "frontendintegrations/demo-fi/ops/ops-guide"
+        );
+        assert_eq!(
+            routes[0]["path"],
+            "/workspaces/:workspace/frontendintegrations/demo-fi/ops/inspecttasks"
+        );
+        assert_eq!(routes[0]["pageId"], "demo-fi-workspace-ops-inspecttasks");
+        assert_eq!(
+            routes[1]["path"],
+            "/workspaces/:workspace/frontendintegrations/demo-fi/ops/ops-guide"
+        );
+        assert_eq!(routes[1]["pageId"], "demo-fi-workspace-ops-ops-guide");
+        assert_eq!(pages[0]["componentsTree"]["meta"]["title"], "Inspect Tasks");
+        assert_eq!(
+            pages[0]["componentsTree"]["dataSources"][1]["type"],
+            "workspace-crd-page-state"
+        );
+        assert_eq!(pages[1]["componentsTree"]["meta"]["title"], "Ops Guide");
+    }
+
+    #[test]
+    fn rejects_page_menu_with_children() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+      children:
+        - displayName: Child
+          key: child
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test
+"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            render_v1_manifest(&fi),
+            Err(ManifestRenderError::InvalidMenuShape { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_org_menu_without_children() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Ops
+      key: ops
+      placement: cluster
+      type: organization
+  pages: []
+"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            render_v1_manifest(&fi),
+            Err(ManifestRenderError::InvalidMenuShape { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_page_for_menu_key() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages: []
+"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            render_v1_manifest(&fi),
+            Err(ManifestRenderError::MissingPageForMenuKey { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_orphan_page_config() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test
+    - key: orphan
+      type: iframe
+      iframe:
+        src: http://example.test/orphan
+"#,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            render_v1_manifest(&fi),
+            Err(ManifestRenderError::OrphanPageConfig { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_invalid_page_shapes_and_keys() {
+        let invalid_menu_key: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: invalid_key
+      placement: cluster
+      type: page
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            render_v1_manifest(&invalid_menu_key),
+            Err(ManifestRenderError::InvalidMenuKey { .. })
+        ));
+
+        let invalid_page_key: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages:
+    - key: invalid_key
+      type: iframe
+      iframe:
+        src: http://example.test
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            render_v1_manifest(&invalid_page_key),
+            Err(ManifestRenderError::InvalidPageShape { .. })
+        ));
+
+        let missing_iframe: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages:
+    - key: overview
+      type: iframe
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            render_v1_manifest(&missing_iframe),
+            Err(ManifestRenderError::InvalidPageShape { .. })
+        ));
+
+        let missing_columns: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages:
+    - key: overview
+      type: crdTable
+      crdTable:
+        names:
+          plural: serviceaccounts
+          kind: ServiceAccount
+        version: v1alpha1
+        group: kubesphere.io
+        scope: Namespaced
+        columns: []
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            render_v1_manifest(&missing_columns),
+            Err(ManifestRenderError::MissingCrdColumns { .. })
+        ));
     }
 }

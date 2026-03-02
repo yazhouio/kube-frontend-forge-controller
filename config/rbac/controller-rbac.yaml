@@ -9,10 +9,10 @@ kind: ClusterRole
 metadata:
   name: frontend-forge-controller
 rules:
-  - apiGroups: ["frontend-forge.io"]
+  - apiGroups: ["frontend-forge.kubesphere.io"]
     resources: ["frontendintegrations"]
     verbs: ["get", "list", "watch", "patch", "update"]
-  - apiGroups: ["frontend-forge.io"]
+  - apiGroups: ["frontend-forge.kubesphere.io"]
     resources: ["frontendintegrations/status"]
     verbs: ["get", "patch", "update"]
   - apiGroups: ["extensions.kubesphere.io"]

@@ -1,7 +1,7 @@
 use chrono::Utc;
 use frontend_forge_api::{
-    FrontendIntegration, FrontendIntegrationPhase, FrontendIntegrationStatus, LastBuildStatus,
-    JSBundle, ResourceRef,
+    FrontendIntegration, FrontendIntegrationPhase, FrontendIntegrationStatus, JSBundle,
+    LastBuildStatus, ResourceRef,
 };
 use frontend_forge_common::{
     ANNO_MANIFEST_HASH, ANNO_OBSERVED_GENERATION, BUILD_KIND_VALUE, CommonError, LABEL_BUILD_KIND,
@@ -1009,8 +1009,8 @@ fn frontend_integration_status_patch(
 mod tests {
     use super::*;
     use frontend_forge_api::{
-        FrontendIntegrationSpec, IframeIntegrationSpec, IntegrationSpec, IntegrationType,
-        RoutingSpec,
+        FrontendIntegrationSpec, IframePageSpec, MenuNodeType, MenuPlacement, PageSpec, PageType,
+        PrimaryMenuSpec,
     };
     use k8s_openapi::api::batch::v1::JobStatus;
     use kube::core::ObjectMeta;
@@ -1026,19 +1026,21 @@ mod tests {
             spec: FrontendIntegrationSpec {
                 display_name: None,
                 enabled: Some(true),
-                integration: IntegrationSpec {
-                    type_: IntegrationType::Iframe,
-                    crd: None,
-                    iframe: Some(IframeIntegrationSpec {
+                menus: vec![PrimaryMenuSpec {
+                    display_name: "demo".to_string(),
+                    key: "demo".to_string(),
+                    placement: MenuPlacement::Global,
+                    type_: MenuNodeType::Page,
+                    children: vec![],
+                }],
+                pages: vec![PageSpec {
+                    key: "demo".to_string(),
+                    type_: PageType::Iframe,
+                    crd_table: None,
+                    iframe: Some(IframePageSpec {
                         src: "http://example.test".to_string(),
                     }),
-                    menu: None,
-                },
-                routing: RoutingSpec {
-                    path: "demo".to_string(),
-                },
-                columns: vec![],
-                menu: None,
+                }],
                 builder: None,
             },
             status,

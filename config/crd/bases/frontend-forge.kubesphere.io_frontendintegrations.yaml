@@ -1,0 +1,276 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  labels:
+    kubesphere.io/resource-served: 'true'
+  name: frontendintegrations.frontend-forge.kubesphere.io
+spec:
+  group: frontend-forge.kubesphere.io
+  names:
+    categories: []
+    kind: FrontendIntegration
+    plural: frontendintegrations
+    shortNames:
+    - fi
+    singular: frontendintegration
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns: []
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for FrontendIntegrationSpec via `CustomResource`
+        properties:
+          spec:
+            properties:
+              builder:
+                nullable: true
+                properties:
+                  engineVersion:
+                    nullable: true
+                    type: string
+                type: object
+              displayName:
+                nullable: true
+                type: string
+              enabled:
+                nullable: true
+                type: boolean
+              menus:
+                items:
+                  properties:
+                    children:
+                      items:
+                        properties:
+                          displayName:
+                            type: string
+                          key:
+                            type: string
+                        required:
+                        - displayName
+                        - key
+                        type: object
+                      type: array
+                    displayName:
+                      type: string
+                    key:
+                      type: string
+                    placement:
+                      enum:
+                      - global
+                      - workspace
+                      - cluster
+                      type: string
+                    type:
+                      enum:
+                      - page
+                      - organization
+                      type: string
+                  required:
+                  - displayName
+                  - key
+                  - placement
+                  - type
+                  type: object
+                type: array
+              pages:
+                items:
+                  properties:
+                    crdTable:
+                      nullable: true
+                      properties:
+                        authKey:
+                          nullable: true
+                          type: string
+                        columns:
+                          items:
+                            properties:
+                              enableHiding:
+                                nullable: true
+                                type: boolean
+                              enableSorting:
+                                nullable: true
+                                type: boolean
+                              key:
+                                type: string
+                              render:
+                                properties:
+                                  format:
+                                    nullable: true
+                                    type: string
+                                  link:
+                                    nullable: true
+                                    type: string
+                                  path:
+                                    type: string
+                                  pattern:
+                                    nullable: true
+                                    type: string
+                                  payload:
+                                    additionalProperties: true
+                                    nullable: true
+                                    type: object
+                                  type:
+                                    enum:
+                                    - text
+                                    - time
+                                    - link
+                                    type: string
+                                required:
+                                - path
+                                - type
+                                type: object
+                              title:
+                                type: string
+                            required:
+                            - key
+                            - render
+                            - title
+                            type: object
+                          type: array
+                        group:
+                          type: string
+                        names:
+                          properties:
+                            kind:
+                              type: string
+                            plural:
+                              type: string
+                          required:
+                          - kind
+                          - plural
+                          type: object
+                        scope:
+                          enum:
+                          - Namespaced
+                          - Cluster
+                          type: string
+                        version:
+                          type: string
+                      required:
+                      - columns
+                      - group
+                      - names
+                      - scope
+                      - version
+                      type: object
+                    iframe:
+                      nullable: true
+                      properties:
+                        src:
+                          type: string
+                      required:
+                      - src
+                      type: object
+                    key:
+                      type: string
+                    type:
+                      enum:
+                      - crdTable
+                      - iframe
+                      type: string
+                  required:
+                  - key
+                  - type
+                  type: object
+                type: array
+            required:
+            - menus
+            - pages
+            type: object
+          status:
+            nullable: true
+            properties:
+              bundle_ref:
+                nullable: true
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    nullable: true
+                    type: string
+                  uid:
+                    nullable: true
+                    type: string
+                required:
+                - name
+                type: object
+              conditions:
+                items:
+                  properties:
+                    last_transition_time:
+                      format: date-time
+                      nullable: true
+                      type: string
+                    message:
+                      nullable: true
+                      type: string
+                    observed_generation:
+                      format: int64
+                      nullable: true
+                      type: integer
+                    reason:
+                      nullable: true
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              last_build:
+                nullable: true
+                properties:
+                  job_ref:
+                    nullable: true
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        nullable: true
+                        type: string
+                      uid:
+                        nullable: true
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                type: object
+              message:
+                nullable: true
+                type: string
+              observed_generation:
+                format: int64
+                nullable: true
+                type: integer
+              observed_manifest_hash:
+                nullable: true
+                type: string
+              observed_spec_hash:
+                nullable: true
+                type: string
+              phase:
+                enum:
+                - Pending
+                - Building
+                - Succeeded
+                - Failed
+                nullable: true
+                type: string
+            type: object
+        required:
+        - spec
+        title: FrontendIntegration
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+

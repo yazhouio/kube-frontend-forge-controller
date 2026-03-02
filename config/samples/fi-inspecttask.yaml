@@ -1,4 +1,4 @@
-apiVersion: frontend-forge.io/v1alpha1
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
 kind: FrontendIntegration
 metadata:
   name: fi-inspecttask
@@ -6,34 +6,33 @@ metadata:
     kubesphere.io/creator: admin
 spec:
   enabled: true
-  integration:
-    type: crd
-    crd:
-      columns:
-        - key: name
-          title: NAME
-          enableSorting: true
-          render:
-            type: text
-            path: metadata.name
-        - key: updateTime
-          title: CREATION_TIME
-          enableHiding: true
-          enableSorting: true
-          render:
-            type: time
-            path: metadata.creationTimestamp
-            format: local-datetime
-      names:
-        plural: inspecttasks
-        kind: InspectTask
-      version: v1alpha2
-      group: kubeeye.kubesphere.io
-      scope: Cluster
-    menu:
-      name: inspecttasks
-  menu:
-    placements:
-      - cluster
-  routing:
-    path: inspecttasks
+  menus:
+    - displayName: Inspect Tasks
+      key: inspecttasks
+      placement: cluster
+      type: page
+  pages:
+    - key: inspecttasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: inspecttasks
+          kind: InspectTask
+        version: v1alpha2
+        group: kubeeye.kubesphere.io
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            enableSorting: true
+            render:
+              type: text
+              path: metadata.name
+          - key: updateTime
+            title: CREATION_TIME
+            enableHiding: true
+            enableSorting: true
+            render:
+              type: time
+              path: metadata.creationTimestamp
+              format: local-datetime

@@ -34,17 +34,21 @@ mod tests {
     fn defaults_to_v1_renderer() {
         let fi: FrontendIntegration = serde_yaml::from_str(
             r#"
-apiVersion: frontend-forge.io/v1alpha1
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
 kind: FrontendIntegration
 metadata:
   name: demo
 spec:
-  integration:
-    type: iframe
-    iframe:
-      src: http://example.test
-  routing:
-    path: demo
+  menus:
+    - displayName: Demo
+      key: demo
+      placement: global
+      type: page
+  pages:
+    - key: demo
+      type: iframe
+      iframe:
+        src: http://example.test
 "#,
         )
         .unwrap();
@@ -57,19 +61,23 @@ spec:
     fn rejects_unknown_engine_version() {
         let fi: FrontendIntegration = serde_yaml::from_str(
             r#"
-apiVersion: frontend-forge.io/v1alpha1
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
 kind: FrontendIntegration
 metadata:
   name: demo
 spec:
   builder:
     engineVersion: v99
-  integration:
-    type: iframe
-    iframe:
-      src: http://example.test
-  routing:
-    path: demo
+  menus:
+    - displayName: Demo
+      key: demo
+      placement: global
+      type: page
+  pages:
+    - key: demo
+      type: iframe
+      iframe:
+        src: http://example.test
 "#,
         )
         .unwrap();

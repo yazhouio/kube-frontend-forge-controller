@@ -112,211 +112,122 @@ export interface ExpressionDeps {
 }
 ```
 
-### demo 1， iframe cr 生成下面 manifest
+## 1. 输入 CR 示例
 
 ```yaml
-apiVersion: frontend-forge.io/v1alpha1
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
 kind: FrontendIntegration
 metadata:
-  name: sss
+  name: demo-fi
   annotations:
-    kubesphere.io/description: sss
-    kubesphere.io/creator: admin
-  creationTimestamp: "2026-02-11T06:29:32Z"
+    kubesphere.io/description: Demo multi-page integration
 spec:
+  displayName: Demo FI
   enabled: true
-  integration:
-    type: iframe
-    iframe:
-      url: >-
-        http://139.198.121.90:40880/clusters/host/frontendintegrations/servicemonitors1/asdfas
-    menu:
-      name: weww
-  menu:
-    placements:
-      - cluster
-      - workspace
-      - global
-  routing:
-    path: wewew
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+    - displayName: Ops
+      key: ops
+      placement: workspace
+      type: organization
+      children:
+        - displayName: Inspect Tasks
+          key: inspecttasks
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test/frontend
+    - key: inspecttasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: inspecttasks
+          kind: InspectTask
+        version: v1alpha2
+        group: kubeeye.kubesphere.io
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            render:
+              type: text
+              path: metadata.name
 ```
+
+## 2. 渲染规则
+
+### 2.1 菜单
+
+- 一级 `page` 菜单直接生成叶子菜单
+- 一级 `organization` 菜单先生成一个分组菜单
+- 一级 `organization` 菜单的 `name` 仍然使用菜单生成规则
+- 二级页面菜单的 `parent` 指向一级组织菜单的 `name`
+
+### 2.2 路由
+
+- 一级页面后缀：`<first-key>`
+- 二级页面后缀：`<first-key>/<second-key>`
+
+最终路径：
+
+- `cluster`: `/clusters/:cluster/frontendintegrations/<fi-name>/<suffix>`
+- `workspace`: `/workspaces/:workspace/frontendintegrations/<fi-name>/<suffix>`
+- `global`: `/frontendintegrations/<fi-name>/<suffix>`
+
+### 2.3 pageId
+
+规则：
+
+```text
+<fi-name>-<placement>-<suffix-slug>
+```
+
+示例：
+
+- `demo-fi-cluster-overview`
+- `demo-fi-workspace-ops-inspecttasks`
+
+## 3. 输出 Manifest 示例
 
 ```json
 {
   "version": "1.0",
-  "name": "sss",
-  "displayName": "sss",
+  "name": "demo-fi",
+  "displayName": "Demo FI",
+  "description": "Demo multi-page integration",
   "routes": [
     {
-      "path": "/clusters/:cluster/frontendintegrations/sss/wewew",
-      "pageId": "sss-cluster"
+      "path": "/clusters/:cluster/frontendintegrations/demo-fi/overview",
+      "pageId": "demo-fi-cluster-overview"
     },
     {
-      "path": "/workspaces/:workspace/frontendintegrations/sss/wewew",
-      "pageId": "sss-workspace"
-    },
-    { "path": "/frontendintegrations/sss/wewew", "pageId": "sss-global" }
+      "path": "/workspaces/:workspace/frontendintegrations/demo-fi/ops/inspecttasks",
+      "pageId": "demo-fi-workspace-ops-inspecttasks"
+    }
   ],
   "menus": [
     {
       "parent": "cluster",
-      "name": "frontendintegrations/sss/wewew",
-      "title": "sss",
+      "name": "frontendintegrations/demo-fi/overview",
+      "title": "Overview",
       "icon": "GridDuotone",
       "order": 999
     },
     {
       "parent": "workspace",
-      "name": "frontendintegrations/sss/wewew",
-      "title": "sss",
+      "name": "frontendintegrations/demo-fi/ops",
+      "title": "Ops",
       "icon": "GridDuotone",
       "order": 999
     },
     {
-      "parent": "global",
-      "name": "frontendintegrations/sss/wewew",
-      "title": "sss",
-      "icon": "GridDuotone",
-      "order": 999
-    }
-  ],
-  "locales": [],
-  "pages": [
-    {
-      "id": "sss-cluster",
-      "entryComponent": "sss-cluster",
-      "componentsTree": {
-        "meta": {
-          "id": "sss-cluster",
-          "name": "sss-cluster",
-          "title": "sss",
-          "path": "/sss-cluster"
-        },
-        "context": {},
-        "root": {
-          "id": "sss-cluster-root",
-          "type": "Iframe",
-          "props": {
-            "FRAME_URL": "http://139.198.121.90:40880/clusters/host/frontendintegrations/servicemonitors1/asdfas"
-          },
-          "meta": { "title": "Iframe", "scope": true }
-        }
-      }
-    },
-    {
-      "id": "sss-workspace",
-      "entryComponent": "sss-workspace",
-      "componentsTree": {
-        "meta": {
-          "id": "sss-workspace",
-          "name": "sss-workspace",
-          "title": "sss",
-          "path": "/sss-workspace"
-        },
-        "context": {},
-        "root": {
-          "id": "sss-workspace-root",
-          "type": "Iframe",
-          "props": {
-            "FRAME_URL": "http://139.198.121.90:40880/clusters/host/frontendintegrations/servicemonitors1/asdfas"
-          },
-          "meta": { "title": "Iframe", "scope": true }
-        }
-      }
-    },
-    {
-      "id": "sss-global",
-      "entryComponent": "sss-global",
-      "componentsTree": {
-        "meta": {
-          "id": "sss-global",
-          "name": "sss-global",
-          "title": "sss",
-          "path": "/sss-global"
-        },
-        "context": {},
-        "root": {
-          "id": "sss-global-root",
-          "type": "Iframe",
-          "props": {
-            "FRAME_URL": "http://139.198.121.90:40880/clusters/host/frontendintegrations/servicemonitors1/asdfas"
-          },
-          "meta": { "title": "Iframe", "scope": true }
-        }
-      }
-    }
-  ],
-  "build": {
-    "target": "kubesphere-extension",
-    "moduleName": "sss",
-    "systemjs": true
-  }
-}
-```
-
-### demo 2， crd 集成
-
-```yaml
-apiVersion: frontend-forge.io/v1alpha1
-kind: FrontendIntegration
-metadata:
-  name: qweqwcccc
-  annotations:
-    kubesphere.io/creator: admin
-  creationTimestamp: "2026-02-24T07:42:15Z"
-spec:
-  enabled: true
-  integration:
-    type: crd
-    crd:
-      columns:
-        - key: name
-          title: NAME
-          enableSorting: true
-          render:
-            type: text
-            path: metadata.name
-        - key: updateTime
-          title: CREATION_TIME
-          enableHiding: true
-          enableSorting: true
-          render:
-            type: time
-            path: metadata.creationTimestamp
-            format: local-datetime
-      names:
-        plural: inspectrules
-        kind: InspectRule
-      version: v1alpha2
-      group: kubeeye.kubesphere.io
-      scope: Cluster
-    menu:
-      name: "2e22"
-  menu:
-    placements:
-      - cluster
-  routing:
-    path: e2e2
-```
-
-生成下面 manifest
-
-```json
-{
-  "version": "1.0",
-  "name": "qweqwcccc",
-  "displayName": "qweqwcccc",
-  "routes": [
-    {
-      "path": "/clusters/:cluster/frontendintegrations/qweqwcccc/e2e2",
-      "pageId": "qweqwcccc-cluster"
-    }
-  ],
-  "menus": [
-    {
-      "parent": "cluster",
-      "name": "frontendintegrations/qweqwcccc/e2e2",
-      "title": "qweqwcccc",
+      "parent": "frontendintegrations/demo-fi/ops",
+      "name": "frontendintegrations/demo-fi/ops/inspecttasks",
+      "title": "Inspect Tasks",
       "icon": "GridDuotone",
       "order": 999
     }
@@ -324,14 +235,35 @@ spec:
   "locales": [],
   "pages": [
     {
-      "id": "qweqwcccc-cluster",
-      "entryComponent": "qweqwcccc-cluster",
+      "id": "demo-fi-cluster-overview",
+      "entryComponent": "demo-fi-cluster-overview",
       "componentsTree": {
         "meta": {
-          "id": "qweqwcccc-cluster",
-          "name": "qweqwcccc-cluster",
-          "title": "qweqwcccc",
-          "path": "/qweqwcccc-cluster"
+          "id": "demo-fi-cluster-overview",
+          "name": "demo-fi-cluster-overview",
+          "title": "Overview",
+          "path": "/demo-fi-cluster-overview"
+        },
+        "context": {},
+        "root": {
+          "id": "demo-fi-cluster-overview-root",
+          "type": "Iframe",
+          "props": {
+            "FRAME_URL": "http://example.test/frontend"
+          },
+          "meta": { "title": "Iframe", "scope": true }
+        }
+      }
+    },
+    {
+      "id": "demo-fi-workspace-ops-inspecttasks",
+      "entryComponent": "demo-fi-workspace-ops-inspecttasks",
+      "componentsTree": {
+        "meta": {
+          "id": "demo-fi-workspace-ops-inspecttasks",
+          "name": "demo-fi-workspace-ops-inspecttasks",
+          "title": "Inspect Tasks",
+          "path": "/demo-fi-workspace-ops-inspecttasks"
         },
         "context": {},
         "dataSources": [
@@ -347,19 +279,7 @@ spec:
                     "type": "text",
                     "path": "metadata.name",
                     "payload": {}
-                  },
-                  "enableSorting": true
-                },
-                {
-                  "key": "updateTime",
-                  "title": "CREATION_TIME",
-                  "render": {
-                    "type": "time",
-                    "path": "metadata.creationTimestamp",
-                    "payload": { "format": "local-datetime" }
-                  },
-                  "enableHiding": true,
-                  "enableSorting": true
+                  }
                 }
               ],
               "HOOK_NAME": "useCrdColumns"
@@ -367,81 +287,29 @@ spec:
           },
           {
             "id": "pageState",
-            "type": "crd-page-state",
+            "type": "workspace-crd-page-state",
             "args": [
               { "type": "binding", "source": "columns", "bind": "columns" }
             ],
             "config": {
-              "PAGE_ID": "qweqwcccc-cluster",
+              "PAGE_ID": "demo-fi-workspace-ops-inspecttasks",
               "CRD_CONFIG": {
                 "apiVersion": "v1alpha2",
-                "kind": "InspectRule",
-                "plural": "inspectrules",
+                "kind": "InspectTask",
+                "plural": "inspecttasks",
                 "group": "kubeeye.kubesphere.io",
                 "kapi": true
               },
-              "SCOPE": "cluster",
               "HOOK_NAME": "useCrdPageState"
             }
           }
         ],
         "root": {
-          "id": "qweqwcccc-cluster-root",
+          "id": "demo-fi-workspace-ops-inspecttasks-root",
           "type": "CrdTable",
           "props": {
-            "TABLE_KEY": "qweqwcccc-cluster",
-            "TITLE": "qweqwcccc",
-            "PARAMS": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "params"
-            },
-            "REFETCH": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "refetch"
-            },
-            "TOOLBAR_LEFT": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "toolbarLeft"
-            },
-            "PAGE_CONTEXT": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "pageContext"
-            },
-            "COLUMNS": {
-              "type": "binding",
-              "source": "columns",
-              "bind": "columns"
-            },
-            "DATA": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "data"
-            },
-            "IS_LOADING": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "loading",
-              "defaultValue": false
-            },
-            "UPDATE": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "update"
-            },
-            "DEL": { "type": "binding", "source": "pageState", "bind": "del" },
-            "CREATE": {
-              "type": "binding",
-              "source": "pageState",
-              "bind": "create"
-            },
-            "CREATE_INITIAL_VALUE": {
-              "apiVersion": "kubeeye.kubesphere.io/v1alpha2",
-              "kind": "InspectRule"
-            }
+            "TABLE_KEY": "demo-fi-workspace-ops-inspecttasks",
+            "TITLE": "Inspect Tasks"
           },
           "meta": { "title": "CrdTable", "scope": true }
         }
@@ -450,8 +318,15 @@ spec:
   ],
   "build": {
     "target": "kubesphere-extension",
-    "moduleName": "qweqwcccc",
+    "moduleName": "demo-fi",
     "systemjs": true
   }
 }
 ```
+
+## 4. 说明
+
+- 顶层 `displayName` 取 `spec.displayName`，缺省回退 `metadata.name`
+- 页面标题来自绑定菜单节点的 `displayName`
+- `global` 在产品语义中对应“扩展坞”
+- `crdTable` 页面在 `workspace` placement 下继续使用 `workspace-crd-page-state`

@@ -597,8 +597,8 @@ fn job_name_from_env() -> String {
 mod tests {
     use super::*;
     use frontend_forge_api::{
-        FrontendIntegrationSpec, IframeIntegrationSpec, IntegrationSpec, IntegrationType,
-        RoutingSpec,
+        FrontendIntegrationSpec, IframePageSpec, MenuNodeType, MenuPlacement, PageSpec, PageType,
+        PrimaryMenuSpec,
     };
     use kube::core::ObjectMeta;
 
@@ -611,19 +611,21 @@ mod tests {
             spec: FrontendIntegrationSpec {
                 display_name: None,
                 enabled: Some(true),
-                integration: IntegrationSpec {
-                    type_: IntegrationType::Iframe,
-                    crd: None,
-                    iframe: Some(IframeIntegrationSpec {
+                menus: vec![PrimaryMenuSpec {
+                    display_name: name.to_string(),
+                    key: name.to_string(),
+                    placement: MenuPlacement::Global,
+                    type_: MenuNodeType::Page,
+                    children: vec![],
+                }],
+                pages: vec![PageSpec {
+                    key: name.to_string(),
+                    type_: PageType::Iframe,
+                    crd_table: None,
+                    iframe: Some(IframePageSpec {
                         src: "http://example.test".to_string(),
                     }),
-                    menu: None,
-                },
-                routing: RoutingSpec {
-                    path: name.to_string(),
-                },
-                columns: vec![],
-                menu: None,
+                }],
                 builder: None,
             },
             status: None,
@@ -723,7 +725,7 @@ mod tests {
         assert_eq!(owner_refs.len(), 1);
 
         let owner = &owner_refs[0];
-        assert_eq!(owner.api_version, "frontend-forge.io/v1alpha1");
+        assert_eq!(owner.api_version, "frontend-forge.kubesphere.io/v1alpha1");
         assert_eq!(owner.kind, "FrontendIntegration");
         assert_eq!(owner.name, "demo");
         assert_eq!(owner.uid, "fi-uid-123");

@@ -2,10 +2,10 @@ use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use snafu::Snafu;
 
-pub const API_GROUP: &str = "frontend-forge.io";
+pub const API_GROUP: &str = "frontend-forge.kubesphere.io";
 pub const API_VERSION: &str = "v1alpha1";
 pub const JSBUNDLE_PLURAL: &str = "jsbundles";
 pub const JSBUNDLE_API_GROUP: &str = "extensions.kubesphere.io";
@@ -13,7 +13,7 @@ pub const JSBUNDLE_API_VERSION: &str = "v1alpha1";
 
 #[derive(CustomResource, Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[kube(
-    group = "frontend-forge.io",
+    group = "frontend-forge.kubesphere.io",
     version = "v1alpha1",
     kind = "FrontendIntegration",
     plural = "frontendintegrations",
@@ -29,12 +29,10 @@ pub struct FrontendIntegrationSpec {
     pub display_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    pub integration: IntegrationSpec,
-    pub routing: RoutingSpec,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub columns: Vec<ColumnSpec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub menu: Option<MenuSpec>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub menus: Vec<PrimaryMenuSpec>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<PageSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builder: Option<BuilderSpec>,
 }
@@ -50,46 +48,67 @@ pub struct BuilderSpec {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct IntegrationSpec {
+pub struct PrimaryMenuSpec {
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    pub key: String,
+    pub placement: MenuPlacement,
     #[serde(rename = "type")]
-    pub type_: IntegrationType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub crd: Option<CrdIntegrationSpec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub iframe: Option<IframeIntegrationSpec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub menu: Option<IntegrationMenuSpec>,
+    pub type_: MenuNodeType,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<SecondaryMenuSpec>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SecondaryMenuSpec {
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    pub key: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum IntegrationType {
-    Crd,
+pub enum MenuNodeType {
+    Page,
+    Organization,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PageSpec {
+    pub key: String,
+    #[serde(rename = "type")]
+    pub type_: PageType,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "crdTable")]
+    pub crd_table: Option<CrdTablePageSpec>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iframe: Option<IframePageSpec>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub enum PageType {
+    #[serde(rename = "crdTable")]
+    #[schemars(rename = "crdTable")]
+    CrdTable,
+    #[serde(rename = "iframe")]
+    #[schemars(rename = "iframe")]
     Iframe,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct IntegrationMenuSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct IframeIntegrationSpec {
+pub struct IframePageSpec {
     #[serde(alias = "url")]
     pub src: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct CrdIntegrationSpec {
+pub struct CrdTablePageSpec {
     pub names: CrdNamesSpec,
     pub group: String,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "authKey")]
     pub auth_key: Option<String>,
     pub scope: CrdScope,
-    // Compatibility: Manifest.md example places columns under integration.crd.columns.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub columns: Vec<ColumnSpec>,
 }
 
@@ -103,11 +122,6 @@ pub struct CrdNamesSpec {
 pub enum CrdScope {
     Namespaced,
     Cluster,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct RoutingSpec {
-    pub path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -141,7 +155,7 @@ pub struct ColumnRenderSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub payload: Option<Value>,
+    pub payload: Option<Map<String, Value>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -150,14 +164,6 @@ pub enum ColumnRenderType {
     Text,
     Time,
     Link,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct MenuSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub placements: Vec<MenuPlacement>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -171,22 +177,55 @@ pub enum MenuPlacement {
 #[derive(Debug, Snafu)]
 pub enum ManifestRenderError {
     #[snafu(display(
-        "FrontendIntegration {} has invalid routing.path '{}' (must not start with '/')",
+        "FrontendIntegration {} has duplicate top-level menu key '{}'",
         fi_name,
-        path
+        key
     ))]
-    InvalidRoutingPath { fi_name: String, path: String },
-    #[snafu(display("FrontendIntegration {} requires columns for CRD integration", fi_name))]
-    MissingCrdColumns { fi_name: String },
+    DuplicateTopLevelMenuKey { fi_name: String, key: String },
+    #[snafu(display("FrontendIntegration {} has duplicate page key '{}'", fi_name, key))]
+    DuplicatePageKey { fi_name: String, key: String },
     #[snafu(display(
-        "FrontendIntegration {} has invalid integration shape: type='{}' but corresponding field is missing",
+        "FrontendIntegration {} is missing page config for menu key '{}'",
         fi_name,
-        integration_type
+        key
     ))]
-    InvalidIntegrationShape {
+    MissingPageForMenuKey { fi_name: String, key: String },
+    #[snafu(display(
+        "FrontendIntegration {} has page config '{}' without a menu binding",
+        fi_name,
+        key
+    ))]
+    OrphanPageConfig { fi_name: String, key: String },
+    #[snafu(display(
+        "FrontendIntegration {} has invalid menu shape for key '{}': {}",
+        fi_name,
+        key,
+        message
+    ))]
+    InvalidMenuShape {
         fi_name: String,
-        integration_type: String,
+        key: String,
+        message: String,
     },
+    #[snafu(display(
+        "FrontendIntegration {} has invalid page shape for key '{}': {}",
+        fi_name,
+        key,
+        message
+    ))]
+    InvalidPageShape {
+        fi_name: String,
+        key: String,
+        message: String,
+    },
+    #[snafu(display("FrontendIntegration {} has invalid menu key '{}'", fi_name, key))]
+    InvalidMenuKey { fi_name: String, key: String },
+    #[snafu(display(
+        "FrontendIntegration {} requires columns for CRD page '{}'",
+        fi_name,
+        key
+    ))]
+    MissingCrdColumns { fi_name: String, key: String },
     #[snafu(display(
         "FrontendIntegration {} requested unsupported builder.engineVersion '{}'",
         fi_name,
@@ -251,7 +290,11 @@ pub struct FrontendIntegrationStatus {
     pub observed_manifest_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_generation: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "active_build")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "active_build"
+    )]
     pub last_build: Option<LastBuildStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle_ref: Option<ResourceRef>,
@@ -328,6 +371,94 @@ impl FrontendIntegrationSpec {
         self.builder
             .as_ref()
             .and_then(|builder| builder.engine_version.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kube::CustomResourceExt;
+
+    #[test]
+    fn deserializes_page_and_org_menu_spec() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+    - displayName: Ops
+      key: ops
+      placement: workspace
+      type: organization
+      children:
+        - displayName: Inspect Tasks
+          key: inspecttasks
+        - displayName: Inspect Rules
+          key: inspectrules
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test/overview
+    - key: inspecttasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: inspecttasks
+          kind: InspectTask
+        group: kubeeye.kubesphere.io
+        version: v1alpha2
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            render:
+              type: text
+              path: metadata.name
+    - key: inspectrules
+      type: crdTable
+      crdTable:
+        names:
+          plural: inspectrules
+          kind: InspectRule
+        group: kubeeye.kubesphere.io
+        version: v1alpha2
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            render:
+              type: text
+              path: metadata.name
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(fi.spec.menus.len(), 2);
+        assert_eq!(fi.spec.pages.len(), 3);
+        assert_eq!(fi.spec.pages[1].type_, PageType::CrdTable);
+    }
+
+    #[test]
+    fn generated_crd_drops_legacy_fields() {
+        let crd = FrontendIntegration::crd();
+        let schema = serde_json::to_value(&crd).unwrap();
+        let spec_properties = &schema["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
+            ["spec"]["properties"];
+
+        assert!(spec_properties.get("menus").is_some());
+        assert!(spec_properties.get("pages").is_some());
+        assert!(spec_properties.get("integration").is_none());
+        assert!(spec_properties.get("routing").is_none());
+        assert!(spec_properties.get("columns").is_none());
+        assert!(spec_properties.get("menu").is_none());
     }
 }
 

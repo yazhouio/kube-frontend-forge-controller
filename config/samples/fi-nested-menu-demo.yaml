@@ -1,18 +1,14 @@
 apiVersion: frontend-forge.kubesphere.io/v1alpha1
 kind: FrontendIntegration
 metadata:
-  name: demo-fi
+  name: fi-nested-menu-demo
   annotations:
-    kubesphere.io/description: Demo iframe integration
+    kubesphere.io/creator: admin
 spec:
-  displayName: Demo FI
+  displayName: Nested Menu Demo
   enabled: true
   menus:
-    - displayName: Demo
-      key: demo
-      placement: global
-      type: page
-    - displayName: Ops
+    - displayName: Ops Center
       key: ops
       placement: workspace
       type: organization
@@ -22,10 +18,6 @@ spec:
         - displayName: Ops Guide
           key: ops-guide
   pages:
-    - key: demo
-      type: iframe
-      iframe:
-        src: http://example.test/frontend
     - key: inspecttasks
       type: crdTable
       crdTable:
@@ -42,9 +34,15 @@ spec:
             render:
               type: text
               path: metadata.name
+          - key: updateTime
+            title: CREATION_TIME
+            enableHiding: true
+            enableSorting: true
+            render:
+              type: time
+              path: metadata.creationTimestamp
+              format: local-datetime
     - key: ops-guide
       type: iframe
       iframe:
-        src: https://kubernetes.io/docs/concepts/overview/#why-you-need-kubernetes-and-what-can-it-do
-  builder:
-    engineVersion: v1
+        src: http://example.test/ops-guide
