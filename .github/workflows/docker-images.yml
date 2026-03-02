@@ -61,28 +61,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 这里仍沿用你原来的 tags 逻辑，但只生成“最终 tag”，不在本 job 里直接打 tag
-      - name: Compute Final Tags
-        id: tags
-        env:
-          IMAGE_NAME: ${{ matrix.image_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        shell: bash
-        run: |
-          image="docker.io/${DOCKERHUB_NAMESPACE}/${IMAGE_NAME}"
-          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-            echo "${image}:${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          date_tag="$(TZ=Asia/Shanghai date +%Y%m%d)"
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "${image}:${date_tag}" >> "$GITHUB_OUTPUT"
-          echo "${image}:latest" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
       # 单平台 build + push（按 digest 推送，不直接 push tag）
       - name: Build and push by digest
         id: build
@@ -134,19 +112,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Compute Final Tags (same logic)
-        id: tags
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        shell: bash
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-            echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-          else
-            date_tag="$(TZ=Asia/Shanghai date +%Y%m%d)"
-            echo "date_tag=${date_tag}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Create and push manifest lists
         shell: bash
         run: |
@@ -165,12 +130,8 @@ jobs:
             amd_digest="$(cat "digests/${image_name}-amd64.txt")"
             arm_digest="$(cat "digests/${image_name}-arm64.txt")"
 
-            # 生成要打的 tags（与你原逻辑一致）
-            tags=()
-            if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
-              tags+=("${repo}:${{ steps.tags.outputs.release_tag }}")
-            else
-              tags+=("${repo}:${{ steps.tags.outputs.date_tag }}")
+            tags=("${repo}:${GITHUB_REF_NAME}")
+            if [[ "${GITHUB_EVENT_NAME}" != "release" ]]; then
               tags+=("${repo}:latest")
             fi
 
