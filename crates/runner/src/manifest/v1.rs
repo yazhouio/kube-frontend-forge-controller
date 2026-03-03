@@ -318,7 +318,7 @@ fn page_id_for_suffix(fi_name: &str, placement: MenuPlacement, suffix: &str) -> 
         "{}-{}-{}",
         fi_name,
         placement.as_str(),
-        suffix.replace('/', "-")
+        suffix.replace('/', "_")
     )
 }
 
@@ -724,18 +724,63 @@ spec:
             routes[0]["path"],
             "/workspaces/:workspace/frontendintegrations/demo-fi/ops/inspecttasks"
         );
-        assert_eq!(routes[0]["pageId"], "demo-fi-workspace-ops-inspecttasks");
+        assert_eq!(routes[0]["pageId"], "demo-fi-workspace-ops_inspecttasks");
         assert_eq!(
             routes[1]["path"],
             "/workspaces/:workspace/frontendintegrations/demo-fi/ops/ops-guide"
         );
-        assert_eq!(routes[1]["pageId"], "demo-fi-workspace-ops-ops-guide");
+        assert_eq!(routes[1]["pageId"], "demo-fi-workspace-ops_ops-guide");
         assert_eq!(pages[0]["componentsTree"]["meta"]["title"], "Inspect Tasks");
         assert_eq!(
             pages[0]["componentsTree"]["dataSources"][1]["type"],
             "workspace-crd-page-state"
         );
         assert_eq!(pages[1]["componentsTree"]["meta"]["title"], "Ops Guide");
+    }
+
+    #[test]
+    fn keeps_distinct_page_ids_for_top_level_and_nested_suffixes() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo-fi
+spec:
+  menus:
+    - displayName: Ops Guide
+      key: ops-guide
+      placement: workspace
+      type: page
+    - displayName: Ops
+      key: ops
+      placement: workspace
+      type: organization
+      children:
+        - displayName: Guide
+          key: guide
+  pages:
+    - key: ops-guide
+      type: iframe
+      iframe:
+        src: http://example.test/top-level
+    - key: guide
+      type: iframe
+      iframe:
+        src: http://example.test/nested
+"#,
+        )
+        .unwrap();
+
+        let manifest = render_v1_manifest(&fi).unwrap();
+        let routes = manifest["routes"].as_array().unwrap();
+        let pages = manifest["pages"].as_array().unwrap();
+
+        assert_eq!(routes[0]["pageId"], "demo-fi-workspace-ops-guide");
+        assert_eq!(routes[1]["pageId"], "demo-fi-workspace-ops_guide");
+        assert_ne!(routes[0]["pageId"], routes[1]["pageId"]);
+        assert_eq!(pages[0]["id"], "demo-fi-workspace-ops-guide");
+        assert_eq!(pages[1]["id"], "demo-fi-workspace-ops_guide");
     }
 
     #[test]
