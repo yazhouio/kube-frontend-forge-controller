@@ -285,8 +285,8 @@ pub struct SimpleCondition {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 pub struct FrontendIntegrationStatus {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub phase: Option<FrontendIntegrationPhase>,
+    #[serde(default)]
+    pub phase: FrontendIntegrationPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_spec_hash: Option<String>,
     // Deprecated compatibility field from earlier MVPs.

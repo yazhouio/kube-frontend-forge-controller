@@ -224,7 +224,7 @@ async fn reconcile(fi: Arc<FrontendIntegration>, ctx: Arc<ContextData>) -> Resul
     info!(
         fi = %fi_name,
         spec_hash,
-        phase = ?fi.status.as_ref().and_then(|s| s.phase.as_ref()),
+        phase = ?fi.status.as_ref().map(|s| &s.phase),
         "reconcile started"
     );
     let desired_bundle_name = default_bundle_name(&fi_name);
@@ -291,10 +291,10 @@ fn needs_new_build(fi: &FrontendIntegration, spec_hash: &str, bundle: Option<&JS
     let observed_hash = status
         .and_then(|s| s.observed_spec_hash.as_deref())
         .or_else(|| status.and_then(|s| s.observed_manifest_hash.as_deref()));
-    let phase = status.and_then(|s| s.phase.clone());
+    let phase = status.map(|s| s.phase.clone());
 
     let hash_changed = observed_hash != Some(spec_hash);
-    let pending_initial = phase.is_none();
+    let pending_initial = status.is_none();
     let missing_matching_bundle = observed_hash == Some(spec_hash)
         && !matches!(
             phase,
@@ -321,7 +321,7 @@ fn should_reuse_build_job(
                 .unwrap_or(false);
             bundle_ready
                 && !matches!(
-                    fi.status.as_ref().and_then(|s| s.phase.clone()),
+                    fi.status.as_ref().map(|s| s.phase.clone()),
                     Some(FrontendIntegrationPhase::Failed)
                 )
         }
@@ -393,7 +393,7 @@ async fn sync_status_from_children(
         if bundle_matches_spec_hash(&bundle, spec_hash) {
             sync_jsbundle_enabled_state(bundle_api, fi, &bundle, true).await?;
             let status = FrontendIntegrationStatus {
-                phase: Some(FrontendIntegrationPhase::Succeeded),
+                phase: FrontendIntegrationPhase::Succeeded,
                 observed_spec_hash: Some(spec_hash.to_string()),
                 observed_manifest_hash: bundle_manifest_hash(&bundle),
                 observed_generation: Some(fi.metadata.generation.unwrap_or_default()),
@@ -839,7 +839,7 @@ fn disabled_status(
     bundle: Option<&JSBundle>,
 ) -> FrontendIntegrationStatus {
     FrontendIntegrationStatus {
-        phase: Some(FrontendIntegrationPhase::Pending),
+        phase: FrontendIntegrationPhase::Pending,
         observed_spec_hash: fi
             .status
             .as_ref()
@@ -864,7 +864,7 @@ fn building_status(
     message: &str,
 ) -> FrontendIntegrationStatus {
     FrontendIntegrationStatus {
-        phase: Some(FrontendIntegrationPhase::Building),
+        phase: FrontendIntegrationPhase::Building,
         observed_spec_hash: Some(spec_hash.to_string()),
         observed_manifest_hash: fi
             .status
@@ -892,7 +892,7 @@ fn succeeded_status(
     job: &Job,
 ) -> FrontendIntegrationStatus {
     FrontendIntegrationStatus {
-        phase: Some(FrontendIntegrationPhase::Succeeded),
+        phase: FrontendIntegrationPhase::Succeeded,
         observed_spec_hash: Some(spec_hash.to_string()),
         observed_manifest_hash: bundle_manifest_hash(bundle),
         observed_generation: Some(fi.metadata.generation.unwrap_or_default()),
@@ -941,7 +941,7 @@ fn failed_status(
     message: String,
 ) -> FrontendIntegrationStatus {
     FrontendIntegrationStatus {
-        phase: Some(FrontendIntegrationPhase::Failed),
+        phase: FrontendIntegrationPhase::Failed,
         observed_spec_hash: Some(spec_hash.to_string()),
         observed_manifest_hash: fi
             .status
@@ -1087,7 +1087,7 @@ mod tests {
             "demo",
             Some(FrontendIntegrationStatus {
                 observed_spec_hash: Some("sha256:old".to_string()),
-                phase: Some(FrontendIntegrationPhase::Succeeded),
+                phase: FrontendIntegrationPhase::Succeeded,
                 ..Default::default()
             }),
         );
@@ -1103,7 +1103,7 @@ mod tests {
         let bundle = bundle_for_hash("fi-demo", &hash);
         fi.status = Some(FrontendIntegrationStatus {
             observed_spec_hash: Some(hash.clone()),
-            phase: Some(FrontendIntegrationPhase::Succeeded),
+            phase: FrontendIntegrationPhase::Succeeded,
             ..Default::default()
         });
 
@@ -1118,7 +1118,7 @@ mod tests {
         let hash = spec_hash(&fi)?;
         fi.status = Some(FrontendIntegrationStatus {
             observed_spec_hash: Some(hash.clone()),
-            phase: Some(FrontendIntegrationPhase::Failed),
+            phase: FrontendIntegrationPhase::Failed,
             ..Default::default()
         });
 
@@ -1133,7 +1133,7 @@ mod tests {
         let hash = spec_hash(&fi)?;
         fi.status = Some(FrontendIntegrationStatus {
             observed_spec_hash: Some(hash.clone()),
-            phase: Some(FrontendIntegrationPhase::Pending),
+            phase: FrontendIntegrationPhase::Pending,
             message: Some("Disabled".to_string()),
             ..Default::default()
         });
@@ -1165,7 +1165,7 @@ mod tests {
         let fi = fi(
             "demo",
             Some(FrontendIntegrationStatus {
-                phase: Some(FrontendIntegrationPhase::Failed),
+                phase: FrontendIntegrationPhase::Failed,
                 ..Default::default()
             }),
         );
@@ -1184,7 +1184,7 @@ mod tests {
         let fi = fi(
             "demo",
             Some(FrontendIntegrationStatus {
-                phase: Some(FrontendIntegrationPhase::Failed),
+                phase: FrontendIntegrationPhase::Failed,
                 ..Default::default()
             }),
         );
@@ -1203,7 +1203,7 @@ mod tests {
         let fi = fi(
             "demo",
             Some(FrontendIntegrationStatus {
-                phase: Some(FrontendIntegrationPhase::Succeeded),
+                phase: FrontendIntegrationPhase::Succeeded,
                 ..Default::default()
             }),
         );
@@ -1265,7 +1265,7 @@ mod tests {
     #[test]
     fn status_patch_sets_null_for_cleared_optional_refs() -> Result<(), Error> {
         let status = FrontendIntegrationStatus {
-            phase: Some(FrontendIntegrationPhase::Pending),
+            phase: FrontendIntegrationPhase::Pending,
             last_build: None,
             bundle_ref: None,
             ..Default::default()
