@@ -31,6 +31,8 @@ pub struct FrontendIntegrationSpec {
         rename = "displayName"
     )]
     pub display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub locales: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -463,12 +465,62 @@ spec:
     }
 
     #[test]
+    fn deserializes_optional_display_name_and_locales() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo
+spec:
+  locales:
+    zh:
+      xx: Chinese
+      yy: Chinese 2
+    en:
+      xx: English
+      yy: English 2
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test/overview
+"#,
+        )
+        .unwrap();
+
+        assert!(fi.spec.display_name.is_none());
+        assert_eq!(
+            fi.spec
+                .locales
+                .get("zh")
+                .and_then(|messages| messages.get("xx"))
+                .map(String::as_str),
+            Some("Chinese")
+        );
+        assert_eq!(
+            fi.spec
+                .locales
+                .get("en")
+                .and_then(|messages| messages.get("yy"))
+                .map(String::as_str),
+            Some("English 2")
+        );
+    }
+
+    #[test]
     fn generated_crd_drops_legacy_fields() {
         let crd = frontend_integration_crd();
         let schema = serde_json::to_value(&crd).unwrap();
         let spec_properties = &schema["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]
             ["spec"]["properties"];
 
+        assert!(spec_properties.get("locales").is_some());
         assert!(spec_properties.get("menus").is_some());
         assert!(spec_properties.get("pages").is_some());
         assert!(spec_properties.get("integration").is_none());

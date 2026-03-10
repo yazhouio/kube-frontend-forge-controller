@@ -51,7 +51,7 @@ pub(super) fn render_v1_manifest(fi: &FrontendIntegration) -> Result<Value, Mani
     }
     manifest.insert("routes".to_string(), Value::Array(routes));
     manifest.insert("menus".to_string(), Value::Array(menus));
-    manifest.insert("locales".to_string(), json!([]));
+    manifest.insert("locales".to_string(), render_locales(&fi.spec));
     manifest.insert("pages".to_string(), Value::Array(pages));
     manifest.insert(
         "build".to_string(),
@@ -571,6 +571,20 @@ fn render_type_str(t: &ColumnRenderType) -> &'static str {
     }
 }
 
+fn render_locales(spec: &FrontendIntegrationSpec) -> Value {
+    let locales = spec
+        .locales
+        .iter()
+        .map(|(lang, messages)| {
+            json!({
+                "lang": lang,
+                "messages": messages,
+            })
+        })
+        .collect::<Vec<Value>>();
+    Value::Array(locales)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,6 +645,7 @@ spec:
         .unwrap();
 
         let manifest = render_v1_manifest(&fi).unwrap();
+        assert_eq!(manifest["locales"], json!([]));
         let pages = manifest["pages"].as_array().unwrap();
 
         let cluster_page_state = &pages[0]["componentsTree"]["dataSources"][1];
@@ -648,6 +663,67 @@ spec:
             "test-workspace-workspace-tasks"
         );
         assert!(workspace_page_state["config"].get("SCOPE").is_none());
+    }
+
+    #[test]
+    fn renders_display_name_fallback_and_locales_from_spec() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo-fi
+spec:
+  locales:
+    zh:
+      xx: Chinese
+      yy: Chinese 2
+    en:
+      xx: English
+      yy: English 2
+    tc:
+      xx: Traditional Chinese
+  menus:
+    - displayName: Overview
+      key: overview
+      placement: cluster
+      type: page
+  pages:
+    - key: overview
+      type: iframe
+      iframe:
+        src: http://example.test
+"#,
+        )
+        .unwrap();
+
+        let manifest = render_v1_manifest(&fi).unwrap();
+        assert_eq!(manifest["displayName"], "demo-fi");
+        assert_eq!(
+            manifest["locales"],
+            json!([
+                {
+                    "lang": "en",
+                    "messages": {
+                        "xx": "English",
+                        "yy": "English 2"
+                    }
+                },
+                {
+                    "lang": "tc",
+                    "messages": {
+                        "xx": "Traditional Chinese"
+                    }
+                },
+                {
+                    "lang": "zh",
+                    "messages": {
+                        "xx": "Chinese",
+                        "yy": "Chinese 2"
+                    }
+                }
+            ])
+        );
     }
 
     #[test]

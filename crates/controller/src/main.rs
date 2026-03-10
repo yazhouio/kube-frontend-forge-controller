@@ -1025,6 +1025,7 @@ mod tests {
             },
             spec: FrontendIntegrationSpec {
                 display_name: None,
+                locales: BTreeMap::new(),
                 enabled: Some(true),
                 menus: vec![PrimaryMenuSpec {
                     display_name: "demo".to_string(),

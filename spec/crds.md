@@ -36,6 +36,13 @@ spec:
 ```yaml
 spec:
   displayName: Demo FI
+  locales:
+    zh:
+      xx: Chinese
+      yy: Chinese 2
+    en:
+      xx: English
+      yy: English 2
   enabled: true
   menus: []
   pages: []
@@ -46,6 +53,7 @@ spec:
 字段说明：
 
 - `displayName`：扩展显示名称，可选
+- `locales`：多语言文案映射，可选，格式为 `<lang> -> <key, message>`
 - `enabled`：是否启用，可选，默认 `true`
 - `menus`：菜单树，必填
 - `pages`：页面配置，必填

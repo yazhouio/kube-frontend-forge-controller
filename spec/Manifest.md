@@ -233,7 +233,20 @@ spec:
       "order": 999
     }
   ],
-  "locales": [],
+  "locales": [
+    {
+      "lang": "en",
+      "messages": { "xx": "English", "yy": "English 2" }
+    },
+    {
+      "lang": "tc",
+      "messages": { "xx": "Traditional Chinese" }
+    },
+    {
+      "lang": "zh",
+      "messages": { "xx": "Chinese", "yy": "Chinese 2" }
+    }
+  ],
   "pages": [
     {
       "id": "demo-fi-cluster-overview",
