@@ -6,6 +6,8 @@ use kube::ResourceExt;
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 
+const DEFAULT_MENU_ICON: &str = "GridDuotone";
+
 pub(super) fn render_v1_manifest(fi: &FrontendIntegration) -> Result<Value, ManifestRenderError> {
     let fi_name = fi.name_any();
     let display_name = fi
@@ -78,12 +80,14 @@ enum ResolvedTopMenu {
 struct ResolvedOrganizationMenu {
     name: String,
     title: String,
+    icon: Option<String>,
     placement: MenuPlacement,
 }
 
 #[derive(Clone, Debug)]
 struct ResolvedPageBinding {
     title: String,
+    icon: Option<String>,
     placement: MenuPlacement,
     route_suffix: String,
     menu_name: String,
@@ -98,6 +102,7 @@ fn resolve_spec(
     let pages_by_key = resolve_pages(spec, fi_name)?;
     let mut top_level_keys = HashSet::new();
     let mut bound_page_keys = HashSet::new();
+    let mut bound_page_bindings = HashSet::new();
     let mut resolved = Vec::new();
 
     for menu in &spec.menus {
@@ -120,9 +125,17 @@ fn resolve_spec(
                     });
                 }
 
-                let page = bind_page(fi_name, &menu.key, &pages_by_key, &mut bound_page_keys)?;
+                let page = bind_page(
+                    fi_name,
+                    menu.placement,
+                    &menu.key,
+                    &pages_by_key,
+                    &mut bound_page_keys,
+                    &mut bound_page_bindings,
+                )?;
                 resolved.push(ResolvedTopMenu::Page(ResolvedPageBinding {
                     title: menu.display_name.clone(),
+                    icon: menu.icon.clone(),
                     placement: menu.placement,
                     route_suffix: route_suffix_for_menu(&menu.key),
                     menu_name: top_menu_name,
@@ -150,10 +163,18 @@ fn resolve_spec(
                 let mut children = Vec::new();
                 for child in &menu.children {
                     validate_key(fi_name, &child.key, true)?;
-                    let page = bind_page(fi_name, &child.key, &pages_by_key, &mut bound_page_keys)?;
+                    let page = bind_page(
+                        fi_name,
+                        menu.placement,
+                        &child.key,
+                        &pages_by_key,
+                        &mut bound_page_keys,
+                        &mut bound_page_bindings,
+                    )?;
                     let route_suffix = route_suffix_for_child(&menu.key, &child.key);
                     children.push(ResolvedPageBinding {
                         title: child.display_name.clone(),
+                        icon: child.icon.clone(),
                         placement: menu.placement,
                         route_suffix: route_suffix.clone(),
                         menu_name: menu_name_for_suffix(fi_name, &route_suffix),
@@ -166,6 +187,7 @@ fn resolve_spec(
                     menu: ResolvedOrganizationMenu {
                         name: top_menu_name,
                         title: menu.display_name.clone(),
+                        icon: menu.icon.clone(),
                         placement: menu.placement,
                     },
                     children,
@@ -208,16 +230,19 @@ fn resolve_pages(
 
 fn bind_page(
     fi_name: &str,
+    placement: MenuPlacement,
     key: &str,
     pages_by_key: &HashMap<String, PageSpec>,
     bound_page_keys: &mut HashSet<String>,
+    bound_page_bindings: &mut HashSet<(String, String)>,
 ) -> Result<PageSpec, ManifestRenderError> {
-    if !bound_page_keys.insert(key.to_string()) {
+    if !bound_page_bindings.insert((placement.as_str().to_string(), key.to_string())) {
         return Err(ManifestRenderError::DuplicatePageKey {
             fi_name: fi_name.to_string(),
             key: key.to_string(),
         });
     }
+    bound_page_keys.insert(key.to_string());
 
     pages_by_key
         .get(key)
@@ -339,7 +364,7 @@ fn render_leaf_menu(page: &ResolvedPageBinding) -> Value {
         "parent": page.parent,
         "name": page.menu_name,
         "title": page.title,
-        "icon": "GridDuotone",
+        "icon": menu_icon(page.icon.as_ref()),
         "order": 999,
     })
 }
@@ -349,9 +374,13 @@ fn render_organization_menu(menu: &ResolvedOrganizationMenu) -> Value {
         "parent": menu.placement.as_str(),
         "name": menu.name,
         "title": menu.title,
-        "icon": "GridDuotone",
+        "icon": menu_icon(menu.icon.as_ref()),
         "order": 999,
     })
+}
+
+fn menu_icon(icon: Option<&String>) -> &str {
+    icon.map(String::as_str).unwrap_or(DEFAULT_MENU_ICON)
 }
 
 fn route_tail(fi_name: &str, suffix: &str) -> String {
@@ -477,15 +506,24 @@ fn crd_page(
             "UPDATE": { "type": "binding", "source": "pageState", "bind": "update" },
             "DEL": { "type": "binding", "source": "pageState", "bind": "del" },
             "CREATE": { "type": "binding", "source": "pageState", "bind": "create" },
-            "CREATE_INITIAL_VALUE": {
-              "apiVersion": format!("{}/{}", crd.group, crd.version),
-              "kind": crd.names.kind
-            }
+            "CREATE_INITIAL_VALUE": crd_create_initial_value(crd)
           },
           "meta": { "title": "CrdTable", "scope": true }
         }
       }
     })
+}
+
+fn crd_create_initial_value(crd: &CrdTablePageSpec) -> Value {
+    let mut initial = Map::new();
+    initial.insert(
+        "apiVersion".to_string(),
+        json!(format!("{}/{}", crd.group, crd.version)),
+    );
+    if let Some(kind) = crd.names.kind.as_ref() {
+        initial.insert("kind".to_string(), json!(kind));
+    }
+    Value::Object(initial)
 }
 
 fn crd_page_state_type(placement: MenuPlacement) -> &'static str {
@@ -498,20 +536,23 @@ fn crd_page_state_type(placement: MenuPlacement) -> &'static str {
 fn crd_page_state_config(page_id: &str, placement: MenuPlacement, crd: &CrdTablePageSpec) -> Value {
     let mut config = Map::new();
     config.insert("PAGE_ID".to_string(), json!(page_id));
-    config.insert(
-        "CRD_CONFIG".to_string(),
-        json!({
-          "apiVersion": crd.version,
-          "kind": crd.names.kind,
-          "plural": crd.names.plural,
-          "group": crd.group,
-          "kapi": true
-        }),
-    );
+    config.insert("CRD_CONFIG".to_string(), crd_page_config(crd));
     if placement != MenuPlacement::Workspace {
         config.insert("SCOPE".to_string(), json!(crd_page_scope(crd)));
     }
     config.insert("HOOK_NAME".to_string(), json!("useCrdPageState"));
+    Value::Object(config)
+}
+
+fn crd_page_config(crd: &CrdTablePageSpec) -> Value {
+    let mut config = Map::new();
+    config.insert("apiVersion".to_string(), json!(crd.version));
+    config.insert("plural".to_string(), json!(crd.names.plural));
+    config.insert("group".to_string(), json!(crd.group));
+    config.insert("kapi".to_string(), json!(true));
+    if let Some(kind) = crd.names.kind.as_ref() {
+        config.insert("kind".to_string(), json!(kind));
+    }
     Value::Object(config)
 }
 
@@ -739,6 +780,7 @@ spec:
   menus:
     - displayName: Ops
       key: ops
+      icon: Folder
       placement: workspace
       type: organization
       children:
@@ -746,6 +788,7 @@ spec:
           key: inspecttasks
         - displayName: Ops Guide
           key: ops-guide
+          icon: File
   pages:
     - key: inspecttasks
       type: crdTable
@@ -780,6 +823,7 @@ spec:
         assert_eq!(pages.len(), 2);
         assert_eq!(menus[0]["name"], "frontendintegrations/demo-fi/ops");
         assert_eq!(menus[0]["parent"], "workspace");
+        assert_eq!(menus[0]["icon"], "Folder");
         assert_eq!(
             menus[1]["parent"],
             "workspace.frontendintegrations/demo-fi/ops"
@@ -788,6 +832,7 @@ spec:
             menus[1]["name"],
             "frontendintegrations/demo-fi/ops/inspecttasks"
         );
+        assert_eq!(menus[1]["icon"], "GridDuotone");
         assert_eq!(
             menus[2]["parent"],
             "workspace.frontendintegrations/demo-fi/ops"
@@ -796,6 +841,7 @@ spec:
             menus[2]["name"],
             "frontendintegrations/demo-fi/ops/ops-guide"
         );
+        assert_eq!(menus[2]["icon"], "File");
         assert_eq!(
             routes[0]["path"],
             "/workspaces/:workspace/frontendintegrations/demo-fi/ops/inspecttasks"
@@ -812,6 +858,137 @@ spec:
             "workspace-crd-page-state"
         );
         assert_eq!(pages[1]["componentsTree"]["meta"]["title"], "Ops Guide");
+    }
+
+    #[test]
+    fn allows_reusing_page_keys_across_cluster_and_workspace() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo-fi
+spec:
+  menus:
+    - displayName: Cluster Ops
+      key: cluster-ops
+      placement: cluster
+      type: organization
+      children:
+        - displayName: Global Rule Groups
+          key: globalrulegroups
+        - displayName: Guide
+          key: guide
+    - displayName: Workspace Ops
+      key: workspace-ops
+      placement: workspace
+      type: organization
+      children:
+        - displayName: Global Rule Groups
+          key: globalrulegroups
+        - displayName: Guide
+          key: guide
+  pages:
+    - key: globalrulegroups
+      type: crdTable
+      crdTable:
+        names:
+          plural: globalrulegroups
+          kind: GlobalRuleGroup
+        group: alerting.kubesphere.io
+        version: v2beta1
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            render:
+              type: text
+              path: metadata.name
+    - key: guide
+      type: iframe
+      iframe:
+        src: http://example.test/guide
+"#,
+        )
+        .unwrap();
+
+        let manifest = render_v1_manifest(&fi).unwrap();
+        let routes = manifest["routes"].as_array().unwrap();
+        let pages = manifest["pages"].as_array().unwrap();
+
+        assert_eq!(routes.len(), 4);
+        assert_eq!(pages.len(), 4);
+        assert_eq!(
+            routes[0]["pageId"],
+            "demo-fi-cluster-cluster-ops_globalrulegroups"
+        );
+        assert_eq!(
+            routes[2]["pageId"],
+            "demo-fi-workspace-workspace-ops_globalrulegroups"
+        );
+        assert_eq!(
+            pages[0]["componentsTree"]["dataSources"][1]["type"],
+            "crd-page-state"
+        );
+        assert_eq!(
+            pages[2]["componentsTree"]["dataSources"][1]["type"],
+            "workspace-crd-page-state"
+        );
+    }
+
+    #[test]
+    fn omits_kind_when_crd_table_kind_is_missing() {
+        let fi: FrontendIntegration = serde_yaml::from_str(
+            r#"
+apiVersion: frontend-forge.kubesphere.io/v1alpha1
+kind: FrontendIntegration
+metadata:
+  name: demo-fi
+spec:
+  menus:
+    - displayName: Inspect Tasks
+      key: inspecttasks
+      placement: cluster
+      type: page
+  pages:
+    - key: inspecttasks
+      type: crdTable
+      crdTable:
+        names:
+          plural: inspecttasks
+        group: kubeeye.kubesphere.io
+        version: v1alpha2
+        scope: Cluster
+        columns:
+          - key: name
+            title: NAME
+            render:
+              type: text
+              path: metadata.name
+"#,
+        )
+        .unwrap();
+
+        let manifest = render_v1_manifest(&fi).unwrap();
+        let page = &manifest["pages"].as_array().unwrap()[0];
+        let props = &page["componentsTree"]["root"]["props"];
+        let page_state = &page["componentsTree"]["dataSources"][1];
+
+        assert_eq!(
+            props["CREATE_INITIAL_VALUE"],
+            json!({
+                "apiVersion": "kubeeye.kubesphere.io/v1alpha2"
+            })
+        );
+        assert_eq!(
+            page_state["config"]["CRD_CONFIG"],
+            json!({
+                "apiVersion": "v1alpha2",
+                "plural": "inspecttasks",
+                "group": "kubeeye.kubesphere.io",
+                "kapi": true
+            })
+        );
     }
 
     #[test]
