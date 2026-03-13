@@ -351,19 +351,14 @@ async fn sync_status_from_children(
     if let Some(job) = current_job {
         match observed_job_phase(job.status.as_ref()) {
             ObservedJobPhase::Pending | ObservedJobPhase::Running => {
-                let status = building_status(fi, spec_hash, bundle_name, &job, "Build in progress");
-                patch_fi_status(fi_api, fi, status).await?;
+                let live_fi = get_live_fi(fi_api, &fi_name).await?;
+                let status =
+                    building_status(&live_fi, spec_hash, bundle_name, &job, "Build in progress");
+                patch_fi_status(fi_api, &live_fi, status).await?;
                 return Ok(Action::requeue(Duration::from_secs(requeue_seconds)));
             }
             ObservedJobPhase::Failed => {
-                let live_fi =
-                    fi_api
-                        .get(&fi_name)
-                        .await
-                        .with_context(|_| GetFrontendIntegrationSnafu {
-                            namespace: "<cluster>".to_string(),
-                            name: fi_name.clone(),
-                        })?;
+                let live_fi = get_live_fi(fi_api, &fi_name).await?;
                 let status = failed_status(
                     &live_fi,
                     spec_hash,
@@ -424,6 +419,19 @@ async fn sync_status_from_children(
     }
 
     Ok(Action::await_change())
+}
+
+async fn get_live_fi(
+    fi_api: &Api<FrontendIntegration>,
+    fi_name: &str,
+) -> Result<FrontendIntegration, Error> {
+    fi_api
+        .get(fi_name)
+        .await
+        .with_context(|_| GetFrontendIntegrationSnafu {
+            namespace: "<cluster>".to_string(),
+            name: fi_name.to_string(),
+        })
 }
 
 async fn find_job_for_hash(
