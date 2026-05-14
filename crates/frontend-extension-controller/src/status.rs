@@ -344,21 +344,7 @@ pub(crate) async fn patch_fe_status_labels(
         return Ok(());
     }
 
-    let has_deprecated_labels = fe.metadata.labels.as_ref().is_some_and(|current| {
-        current.contains_key(DEPRECATED_LABEL_FE_PACKAGE_STATUS)
-            || current.contains_key(DEPRECATED_LABEL_FE_PUBLISH_STATUS)
-    });
-    if has_deprecated_labels {
-        let patch = frontend_extension_clear_labels_patch();
-        fe_api
-            .patch(fe_name, &PatchParams::default(), &Patch::Merge(&patch))
-            .await
-            .with_context(|_| PatchFrontendExtensionStatusLabelsSnafu {
-                name: fe_name.to_string(),
-            })?;
-    }
-
-    let patch = frontend_extension_status_labels_patch(fe, status);
+    let patch = frontend_extension_status_labels_patch(status);
     fe_api
         .patch(fe_name, &PatchParams::default(), &Patch::Merge(&patch))
         .await
@@ -370,25 +356,24 @@ pub(crate) async fn patch_fe_status_labels(
 }
 
 pub(crate) fn frontend_extension_status_labels_patch(
-    fe: &FrontendExtension,
     status: &FrontendExtensionStatus,
 ) -> serde_json::Value {
-    let mut labels = fe.metadata.labels.clone().unwrap_or_default();
-    labels.remove(DEPRECATED_LABEL_FE_PACKAGE_STATUS);
-    labels.remove(DEPRECATED_LABEL_FE_PUBLISH_STATUS);
-    labels.extend(frontend_extension_status_labels(status));
+    let mut labels = serde_json::Map::new();
+    for (key, value) in frontend_extension_status_labels(status) {
+        labels.insert(key, json!(value));
+    }
+    labels.insert(
+        DEPRECATED_LABEL_FE_PACKAGE_STATUS.to_string(),
+        serde_json::Value::Null,
+    );
+    labels.insert(
+        DEPRECATED_LABEL_FE_PUBLISH_STATUS.to_string(),
+        serde_json::Value::Null,
+    );
 
     json!({
         "metadata": {
             "labels": labels,
-        },
-    })
-}
-
-pub(crate) fn frontend_extension_clear_labels_patch() -> serde_json::Value {
-    json!({
-        "metadata": {
-            "labels": serde_json::Value::Null,
         },
     })
 }
